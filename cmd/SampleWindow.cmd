@@ -1,4 +1,4 @@
-::@echo off
+@echo off
 
 SET includes=-Iapp\inc -Ilib\GLFW -Ilib\glm -Ilib\Vulkan\Include
 SET links=-Llib\Vulkan\Lib -Llib\GLFW -lvulkan-1 -l:libglfw3.a -lgdi32
