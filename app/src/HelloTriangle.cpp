@@ -2,9 +2,26 @@
 #include <glfw3.h>
 
 #include <iostream>
+#include <optional>
 #include <vector>
 #include <stdexcept>
 #include <cstdlib>
+
+struct VkContext
+{
+  VkInstance instance;
+  VkPhysicalDevice physical_device = VK_NULL_HANDLE;
+};
+
+struct QueueFamilyIndices
+{
+  std::optional<uint32_t> graphics_family;
+
+  bool isComplete()
+  {
+    return graphics_family.has_value();
+  }
+};
 
 /**
  * A triangle app
@@ -24,7 +41,7 @@ public:
 private:
 
   GLFWwindow *window;
-  VkInstance instance;
+  VkContext context;
 
   const uint32_t WIDTH = 800;
   const uint32_t HEIGHT = 600;
@@ -63,7 +80,7 @@ private:
     create_info.ppEnabledExtensionNames = glfw_extensions;
     create_info.enabledLayerCount = 0;
 
-    if (vkCreateInstance(&create_info, nullptr, &instance) != VK_SUCCESS)
+    if (vkCreateInstance(&create_info, nullptr, &context.instance) != VK_SUCCESS)
     {
       throw std::runtime_error("failed to create instance!");
     }
@@ -91,9 +108,71 @@ private:
     }
   }
 
+  bool isDeviceSuitable(const VkPhysicalDevice &device)
+  {
+    QueueFamilyIndices indices = findQueueFamilies(device);
+
+    return indices.isComplete();
+  }
+
+  void pickPhysicalDevice()
+  {
+    uint32_t device_count = 0;
+
+    vkEnumeratePhysicalDevices(context.instance, &device_count, nullptr);
+
+    if (device_count == 0)
+    {
+      throw std::runtime_error("Failed to find GPUs with Vulkan support!");
+    }
+
+    std::vector<VkPhysicalDevice> devices(device_count);
+    vkEnumeratePhysicalDevices(context.instance, &device_count, devices.data());
+    
+    for (const VkPhysicalDevice &device : devices)
+    {
+      if (isDeviceSuitable(device))
+      {
+        context.physical_device = device;
+        break;
+      }
+    }
+
+    if (context.physical_device == VK_NULL_HANDLE)
+    {
+      throw std::runtime_error("Failed to find a suitable GPU!");
+    }
+  }
+
+  QueueFamilyIndices findQueueFamilies(const VkPhysicalDevice &device)
+  {
+    QueueFamilyIndices indices;
+
+    uint32_t queue_family_count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, nullptr);
+
+    std::vector<VkQueueFamilyProperties> queue_families(queue_family_count);
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, queue_families.data());
+
+    int i = 0;
+    for (const VkQueueFamilyProperties &queue_family : queue_families)
+    {
+      if (queue_family.queueFlags & VK_QUEUE_GRAPHICS_BIT)
+      {
+        indices.graphics_family = i;
+        break;
+      }
+
+      i++;
+    }
+
+    return indices;
+  }
+
   void initVulkan()
   {
     createInstance();
+    pickPhysicalDevice();
   }
 
   void mainLoop()
@@ -106,7 +185,7 @@ private:
 
   void cleanup()
   {
-    vkDestroyInstance(instance, nullptr);
+    vkDestroyInstance(context.instance, nullptr);
     glfwDestroyWindow(window);
     glfwTerminate();
   }
