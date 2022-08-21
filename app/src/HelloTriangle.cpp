@@ -11,6 +11,8 @@ struct VkContext
 {
   VkInstance instance;
   VkPhysicalDevice physical_device = VK_NULL_HANDLE;
+  VkDevice device;
+  VkQueue graphics_queue;
 };
 
 struct QueueFamilyIndices
@@ -169,10 +171,40 @@ private:
     return indices;
   }
 
+  void createLogicalDevice()
+  {
+    QueueFamilyIndices indices = findQueueFamilies(context.physical_device);
+    float queue_priority = 1.0f;
+
+    VkDeviceQueueCreateInfo queue_create_info{};
+    queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queue_create_info.queueFamilyIndex = indices.graphics_family.value();
+    queue_create_info.queueCount = 1;
+    queue_create_info.pQueuePriorities = &queue_priority;
+
+    VkPhysicalDeviceFeatures device_features{};
+
+    VkDeviceCreateInfo create_info{};
+    create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    create_info.pQueueCreateInfos = &queue_create_info;
+    create_info.queueCreateInfoCount = 1;
+    create_info.pEnabledFeatures = &device_features;
+    create_info.enabledExtensionCount = 0;
+    create_info.enabledLayerCount = 0;
+
+    if (vkCreateDevice(context.physical_device, &create_info, nullptr, &context.device) != VK_SUCCESS)
+    {
+      throw std::runtime_error("Failed to create logical device!");
+    }
+
+    vkGetDeviceQueue(context.device, indices.graphics_family.value(), 0, &context.graphics_queue);
+  }
+
   void initVulkan()
   {
     createInstance();
     pickPhysicalDevice();
+    createLogicalDevice();
   }
 
   void mainLoop()
@@ -185,6 +217,7 @@ private:
 
   void cleanup()
   {
+    vkDestroyDevice(context.device, nullptr);
     vkDestroyInstance(context.instance, nullptr);
     glfwDestroyWindow(window);
     glfwTerminate();
