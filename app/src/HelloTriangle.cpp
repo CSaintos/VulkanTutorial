@@ -25,6 +25,7 @@ struct VkContext
   std::vector<VkImage> swap_chain_images;
   VkFormat swap_chain_image_format;
   VkExtent2D swap_chain_extent;
+  std::vector<VkImageView> swap_chain_image_views;
 };
 
 struct QueueFamilyIndices
@@ -419,6 +420,36 @@ private:
     context.swap_chain_extent = extent;
   }
 
+  void createImageViews()
+  {
+    context.swap_chain_image_views.resize(context.swap_chain_images.size());
+
+    for (size_t i = 0; i < context.swap_chain_images.size(); i++)
+    {
+      VkImageViewCreateInfo create_info{};
+      create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+      create_info.image = context.swap_chain_images[i];
+      create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+      create_info.format = context.swap_chain_image_format;
+      // swizzle color channels
+      create_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+      create_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+      create_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+      create_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+      // describe image purpose and image access
+      create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      create_info.subresourceRange.baseMipLevel = 0;
+      create_info.subresourceRange.levelCount = 1;
+      create_info.subresourceRange.baseArrayLayer = 0;
+      create_info.subresourceRange.layerCount = 1;
+
+      if (vkCreateImageView(context.device, &create_info, nullptr, &context.swap_chain_image_views[i]) != VK_SUCCESS)
+      {
+        throw std::runtime_error("failed to create image views!");
+      }
+    }
+  }
+
   void initVulkan()
   {
     createInstance();
@@ -426,6 +457,7 @@ private:
     pickPhysicalDevice();
     createLogicalDevice();
     createSwapChain();
+    createImageViews();
   }
 
   void mainLoop()
@@ -438,6 +470,11 @@ private:
 
   void cleanup()
   {
+    for (VkImageView image_view : context.swap_chain_image_views)
+    {
+      vkDestroyImageView(context.device, image_view, nullptr);
+    }
+
     vkDestroySwapchainKHR(context.device, context.swap_chain, nullptr);
     vkDestroyDevice(context.device, nullptr);
     vkDestroySurfaceKHR(context.instance, context.surface, nullptr);
