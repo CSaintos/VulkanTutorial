@@ -29,6 +29,7 @@ struct VkContext
   std::vector<VkImageView> swap_chain_image_views;
   VkRenderPass render_pass;
   VkPipelineLayout pipeline_layout;
+  VkPipeline graphics_pipeline;
 };
 
 struct QueueFamilyIndices
@@ -629,6 +630,29 @@ private:
       throw std::runtime_error("Failed to create pipeline layout!");
     }
 
+    VkGraphicsPipelineCreateInfo pipeline_info{};
+    pipeline_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipeline_info.stageCount = 2;
+    pipeline_info.pStages = shader_stages;
+    pipeline_info.pVertexInputState = &vertex_input_info;
+    pipeline_info.pInputAssemblyState = &input_assembly;
+    pipeline_info.pViewportState = &viewport_state_info;
+    pipeline_info.pRasterizationState = &rasterization_info;
+    pipeline_info.pMultisampleState = &multisampling_info;
+    pipeline_info.pDepthStencilState = nullptr; // Optional
+    pipeline_info.pColorBlendState = &color_blend_info;
+    pipeline_info.pDynamicState = &dynamic_state;
+    pipeline_info.layout = context.pipeline_layout;
+    pipeline_info.renderPass = context.render_pass;
+    pipeline_info.subpass = 0;
+    pipeline_info.basePipelineHandle = VK_NULL_HANDLE; // Optional
+    pipeline_info.basePipelineIndex = -1; // Optional
+
+    if (vkCreateGraphicsPipelines(context.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &context.graphics_pipeline) != VK_SUCCESS)
+    {
+      throw std::runtime_error("failed to create graphics pipeline!");
+    }
+
     vkDestroyShaderModule(context.device, frag_shader_module, nullptr);
     vkDestroyShaderModule(context.device, vert_shader_module, nullptr);
   }
@@ -655,6 +679,7 @@ private:
 
   void cleanup()
   {
+    vkDestroyPipeline(context.device, context.graphics_pipeline, nullptr);
     vkDestroyPipelineLayout(context.device, context.pipeline_layout, nullptr);
     vkDestroyRenderPass(context.device, context.render_pass, nullptr);
     for (VkImageView image_view : context.swap_chain_image_views)
