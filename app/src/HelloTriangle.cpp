@@ -30,6 +30,7 @@ struct VkContext
   VkRenderPass render_pass;
   VkPipelineLayout pipeline_layout;
   VkPipeline graphics_pipeline;
+  std::vector<VkFramebuffer> swap_chain_framebuffers;
 };
 
 struct QueueFamilyIndices
@@ -657,6 +658,34 @@ private:
     vkDestroyShaderModule(context.device, vert_shader_module, nullptr);
   }
 
+  void createFramebuffers()
+  {
+    context.swap_chain_framebuffers.resize(context.swap_chain_image_views.size());
+
+    for (size_t i = 0; i < context.swap_chain_image_views.size(); i++)
+    {
+      VkImageView attachments[] =
+      {
+        context.swap_chain_image_views[i]
+      };
+
+      VkFramebufferCreateInfo framebuffer_info{};
+      framebuffer_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+      framebuffer_info.renderPass = context.render_pass;
+      framebuffer_info.attachmentCount = 1;
+      framebuffer_info.pAttachments = attachments;
+      framebuffer_info.width = context.swap_chain_extent.width;
+      framebuffer_info.height = context.swap_chain_extent.height;
+      framebuffer_info.layers = 1;
+
+      if (vkCreateFramebuffer(context.device, &framebuffer_info, nullptr, &context.swap_chain_framebuffers[i]) != VK_SUCCESS)
+      {
+        throw std::runtime_error("Failed to create framebuffer!");
+      }
+    }
+
+  }
+
   void initVulkan()
   {
     createInstance();
@@ -667,6 +696,7 @@ private:
     createImageViews();
     createRenderPass();
     createGraphicsPipeline();
+    createFramebuffers();
   }
 
   void mainLoop()
@@ -679,9 +709,15 @@ private:
 
   void cleanup()
   {
+    for (VkFramebuffer framebuffer : context.swap_chain_framebuffers)
+    {
+      vkDestroyFramebuffer(context.device, framebuffer, nullptr);
+    }
+
     vkDestroyPipeline(context.device, context.graphics_pipeline, nullptr);
     vkDestroyPipelineLayout(context.device, context.pipeline_layout, nullptr);
     vkDestroyRenderPass(context.device, context.render_pass, nullptr);
+    
     for (VkImageView image_view : context.swap_chain_image_views)
     {
       vkDestroyImageView(context.device, image_view, nullptr);
