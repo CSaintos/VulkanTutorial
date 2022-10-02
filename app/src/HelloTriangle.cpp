@@ -33,6 +33,9 @@ struct VkContext
   std::vector<VkFramebuffer> swap_chain_framebuffers;
   VkCommandPool command_pool;
   VkCommandBuffer command_buffer;
+  VkSemaphore image_available_semaphore;
+  VkSemaphore render_finished_semaphore;
+  VkFence in_flight_fence;
 };
 
 struct QueueFamilyIndices
@@ -478,12 +481,22 @@ private:
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &color_attachment_ref;
 
+    VkSubpassDependency dependency{};
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass = 0;
+    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.srcAccessMask = 0;
+    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
     VkRenderPassCreateInfo render_pass_info{};
     render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     render_pass_info.attachmentCount = 1;
     render_pass_info.pAttachments = &color_attachment;
     render_pass_info.subpassCount = 1;
     render_pass_info.pSubpasses = &subpass;
+    render_pass_info.dependencyCount = 1;
+    render_pass_info.pDependencies = &dependency;
 
     if (vkCreateRenderPass(context.device, &render_pass_info, nullptr, &context.render_pass) != VK_SUCCESS)
     {
@@ -766,6 +779,70 @@ private:
     }
   }
 
+  void createSyncObjects() 
+  {
+    VkSemaphoreCreateInfo semaphore_info{};
+    semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+    VkFenceCreateInfo fence_info{};
+    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+    if (vkCreateSemaphore(context.device, &semaphore_info, nullptr, &context.image_available_semaphore)!= VK_SUCCESS ||
+        vkCreateSemaphore(context.device, &semaphore_info, nullptr, &context.render_finished_semaphore) != VK_SUCCESS ||
+        vkCreateFence(context.device, &fence_info, nullptr, &context.in_flight_fence) != VK_SUCCESS)
+    {
+      throw std::runtime_error("Failed to create semaphore!");
+    }
+  }
+
+  void drawFrame() 
+  {
+    vkWaitForFences(context.device, 1, &context.in_flight_fence, VK_TRUE, UINT64_MAX);
+    vkResetFences(context.device, 1, &context.in_flight_fence);
+
+    uint32_t image_index;
+    vkAcquireNextImageKHR(context.device, context.swap_chain, UINT64_MAX, context.image_available_semaphore, VK_NULL_HANDLE, &image_index);
+
+    vkResetCommandBuffer(context.command_buffer, 0);
+    recordCommandBuffer(context.command_buffer, image_index);
+
+    VkSubmitInfo submit_info{};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+    VkSemaphore wait_semaphores[] = {context.image_available_semaphore};
+    VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+
+    submit_info.waitSemaphoreCount = 1;
+    submit_info.pWaitSemaphores = wait_semaphores;
+    submit_info.pWaitDstStageMask = wait_stages;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &context.command_buffer;
+
+    VkSemaphore signal_semaphores[] = {context.render_finished_semaphore};
+
+    submit_info.signalSemaphoreCount = 1;
+    submit_info.pSignalSemaphores = signal_semaphores;
+
+    if (vkQueueSubmit(context.graphics_queue, 1, &submit_info, context.in_flight_fence) != VK_SUCCESS)
+    {
+      throw std::runtime_error("Failed to submit draw command buffer!");
+    }
+
+    VkPresentInfoKHR present_info{};
+    present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    present_info.waitSemaphoreCount = 1;
+    present_info.pWaitSemaphores = signal_semaphores;
+
+    VkSwapchainKHR swap_chains[] = {context.swap_chain};
+    present_info.swapchainCount = 1;
+    present_info.pSwapchains = swap_chains;
+    present_info.pImageIndices = &image_index;
+    present_info.pResults; // Optional
+
+    vkQueuePresentKHR(context.present_queue, &present_info);
+  }
+
   void initVulkan()
   {
     createInstance();
@@ -779,6 +856,7 @@ private:
     createFramebuffers();
     createCommandPool();
     createCommandBuffer();
+    createSyncObjects();
   }
 
   void mainLoop()
@@ -786,11 +864,18 @@ private:
     while (!glfwWindowShouldClose(window))
     {
       glfwPollEvents();
+      drawFrame();
     }
+
+    vkDeviceWaitIdle(context.device);
   }
 
   void cleanup()
   {
+    vkDestroySemaphore(context.device, context.image_available_semaphore, nullptr);
+    vkDestroySemaphore(context.device, context.render_finished_semaphore, nullptr);
+    vkDestroyFence(context.device, context.in_flight_fence, nullptr);
+
     vkDestroyCommandPool(context.device, context.command_pool, nullptr);
 
     for (VkFramebuffer framebuffer : context.swap_chain_framebuffers)
