@@ -37,6 +37,7 @@ struct VkContext
   std::vector<VkSemaphore> render_finished_semaphores;
   std::vector<VkFence> in_flight_fences;
   uint32_t current_frame = 0;
+  bool framebuffer_resized = false;
 };
 
 struct QueueFamilyIndices
@@ -86,15 +87,23 @@ private:
 
   const int MAX_FRAMES_IN_FLIGHT = 2;
 
+  static void framebufferResizeCallback(GLFWwindow* window, int width, int height)
+  {
+    auto app = reinterpret_cast<HelloTriangle*>(glfwGetWindowUserPointer(window));
+    app->context.framebuffer_resized = true;
+  }
+
   void initWindow()
   {
     // Initialize GLFW
     glfwInit();
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    //glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
     window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+    glfwSetWindowUserPointer(window, this);
+    glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
   }
 
   void createInstance()
@@ -811,10 +820,21 @@ private:
   void drawFrame() 
   {
     vkWaitForFences(context.device, 1, &context.in_flight_fences[context.current_frame], VK_TRUE, UINT64_MAX);
-    vkResetFences(context.device, 1, &context.in_flight_fences[context.current_frame]);
 
     uint32_t image_index;
-    vkAcquireNextImageKHR(context.device, context.swap_chain, UINT64_MAX, context.image_available_semaphores[context.current_frame], VK_NULL_HANDLE, &image_index);
+    VkResult result = vkAcquireNextImageKHR(context.device, context.swap_chain, UINT64_MAX, context.image_available_semaphores[context.current_frame], VK_NULL_HANDLE, &image_index);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR)
+    {
+      recreateSwapChain();
+      return;
+    }
+    else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
+    {
+      throw std::runtime_error("Failed to acquire swap chain image!");
+    }
+
+    vkResetFences(context.device, 1, &context.in_flight_fences[context.current_frame]);
 
     vkResetCommandBuffer(context.command_buffers[context.current_frame], 0);
     recordCommandBuffer(context.command_buffers[context.current_frame], image_index);
@@ -852,9 +872,53 @@ private:
     present_info.pImageIndices = &image_index;
     present_info.pResults; // Optional
 
-    vkQueuePresentKHR(context.present_queue, &present_info);
+    result = vkQueuePresentKHR(context.present_queue, &present_info);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || context.framebuffer_resized)
+    {
+      context.framebuffer_resized = false;
+      recreateSwapChain();
+    }
+    else if (result != VK_SUCCESS) 
+    {
+      throw std::runtime_error("Failed to present swap chain image!");
+    }
 
     context.current_frame = (context.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+  }
+
+  void cleanupSwapChain()
+  {
+    for (size_t i = 0; i < context.swap_chain_framebuffers.size(); i++)
+    {
+      vkDestroyFramebuffer(context.device, context.swap_chain_framebuffers[i], nullptr);
+    }
+
+    for (size_t i = 0; i < context.swap_chain_image_views.size(); i++)
+    {
+      vkDestroyImageView(context.device, context.swap_chain_image_views[i], nullptr);
+    }
+
+    vkDestroySwapchainKHR(context.device, context.swap_chain, nullptr);
+  }
+
+  void recreateSwapChain()
+  {
+    int width = 0, height = 0;
+    glfwGetFramebufferSize(window, &width, &height);
+    while (width == 0 || height == 0)
+    {
+      glfwGetFramebufferSize(window, &width, &height);
+      glfwWaitEvents();
+    }
+
+    vkDeviceWaitIdle(context.device);
+
+    cleanupSwapChain();
+
+    createSwapChain();
+    createImageViews();
+    createFramebuffers();
   }
 
   void initVulkan()
@@ -886,6 +950,12 @@ private:
 
   void cleanup()
   {
+    cleanupSwapChain();
+
+    vkDestroyPipeline(context.device, context.graphics_pipeline, nullptr);
+    vkDestroyPipelineLayout(context.device, context.pipeline_layout, nullptr);
+    vkDestroyRenderPass(context.device, context.render_pass, nullptr);
+
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
     {
       vkDestroySemaphore(context.device, context.image_available_semaphores[i], nullptr);
@@ -895,21 +965,6 @@ private:
 
     vkDestroyCommandPool(context.device, context.command_pool, nullptr);
 
-    for (VkFramebuffer framebuffer : context.swap_chain_framebuffers)
-    {
-      vkDestroyFramebuffer(context.device, framebuffer, nullptr);
-    }
-
-    vkDestroyPipeline(context.device, context.graphics_pipeline, nullptr);
-    vkDestroyPipelineLayout(context.device, context.pipeline_layout, nullptr);
-    vkDestroyRenderPass(context.device, context.render_pass, nullptr);
-    
-    for (VkImageView image_view : context.swap_chain_image_views)
-    {
-      vkDestroyImageView(context.device, image_view, nullptr);
-    }
-
-    vkDestroySwapchainKHR(context.device, context.swap_chain, nullptr);
     vkDestroyDevice(context.device, nullptr);
     vkDestroySurfaceKHR(context.instance, context.surface, nullptr);
     vkDestroyInstance(context.instance, nullptr);
